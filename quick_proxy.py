@@ -43,13 +43,13 @@ class Dumper:
 
 class Proxy(Thread):
     def __init__(self,
-                 listen_port, server_host, server_port,
-                 listen_ipv6=False):
+                 listen_port, server_host, server_port, 
+                 udp=False, listen_ipv6=False):
 
         Thread.__init__(self, name='port' + str(listen_port))
 
         server_addrs = socket.getaddrinfo(server_host, server_port,
-                                          0, socket.SOCK_STREAM)
+                                          0, udp ? socket.SOCK_DGRAM : socket.SOCK_STREAM)
         server_addr = server_addrs[0]
         if len(server_addrs) > 1:
             readable_addrs = [addr[4][0] for addr in server_addrs]
@@ -62,18 +62,18 @@ class Proxy(Thread):
         self.server_socktype = server_addr[1]
         self.server_proto    = server_addr[2]
         self.server_sockaddr = server_addr[4][:2]
-
+        self.udp             = udp
         self.listen_ipv6     = listen_ipv6
 
         print("Proxy for port %s ready" % self.listen_port)
 
     def run(self):
         if self.listen_ipv6:
-            proxy = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            proxy = socket.socket(socket.AF_INET6, self.udp ? socket.SOCK_DGRAM : socket.SOCK_STREAM)
             proxy.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             proxy.bind(("::", self.listen_port))
         else:
-            proxy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            proxy = socket.socket(socket.AF_INET, self.udp ? socket.SOCK_DGRAM : socket.SOCK_STREAM)
             proxy.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             proxy.bind(("0.0.0.0", self.listen_port))
 
@@ -85,7 +85,7 @@ class Proxy(Thread):
         data_to_filter = {}
         socket_to_dumper = {}
 
-        proxy.listen(10)
+        proxy.listen(15)
 
         while True:
             vaild_sockets = client_sockets | server_sockets
@@ -140,26 +140,55 @@ class Proxy(Thread):
 
             # handling a new connect to the proxy
             if proxy in ready_read:
-                client, address = proxy.accept()
-                client.setblocking(0)
-
                 server = socket.socket(self.server_family,
                                        self.server_socktype)
                 server.setblocking(0)
+                client = None
+                if !self.udp:
+                    client, address = proxy.accept()
+                    client.setblocking(0)
 
-                try:
-                    server.connect(self.server_sockaddr)
-                except socket.error as E:
-                    if E.errno == errno.EINPROGRESS or E.errno == 10035:
-                        pass  # it is normal to have EINPROGRESS here
-                    else:
-                        client.close()
-                        server.close()
-                        continue
+                    try:
+                        server.connect(self.server_sockaddr)
+                    except socket.error as E:
+                        if E.errno == errno.EINPROGRESS or E.errno == 10035:
+                            pass  # it is normal to have EINPROGRESS here
+                        else:
+                            client.close()
+                            server.close()
+                            continue
+                else:
+                    data, client = server_socket.recvfrom(65536)
+                    if data:
+                        if s in server_sockets:
+                            socket_to_dumper[s].dump(data)
 
-                socket_to_dumper[server] = Dumper(self.listen_port)
+                        # check if to filter data out
+                        data_to_filter[s] += data
+
+                        for pattern in config.FILTER_RE:
+                            if re.search(pattern, data_to_filter[s]):
+                                print("Connection dropped at pattern %s" % pattern)
+                                s.close()
+                                s_pair.close()
+
+                        data_to_filter[s] = (
+                            data_to_filter[s][-config.FILTER_WINDOW_SIZE:]
+                        )
+
+                        data_to_send[s_pair] += data
+                    else:  # connection was closed
+                        if s in server_sockets and data_to_send[s_pair]:
+                            closed_but_data_left_sockets.add(s_pair)
+                            s_pair.shutdown(socket.SHUT_RD)
+                        else:
+                            s_pair.close()
+
+                        s.close()
+                        break
 
                 socket_pairs.add_pair(client, server)
+                socket_to_dumper[server] = Dumper(self.listen_port)
 
                 data_to_send[client]   = b''
                 data_to_send[server]   = b''
@@ -171,7 +200,7 @@ class Proxy(Thread):
                 server_sockets.add(server)
 
                 print("Connect to port %s from %s" %
-                      (self.listen_port, address))
+                      (self.listen_port, self.udp ? client : address))
 
             for s in ready_read:
                 if s == proxy:
@@ -183,7 +212,6 @@ class Proxy(Thread):
                 except:
                     s_pair.close()
                     break
-
                 if data:
                     if s in server_sockets:
                         socket_to_dumper[s].dump(data)
@@ -231,8 +259,8 @@ class Proxy(Thread):
                 data_to_send[s] = data_to_send[s][sent:]
 
 for listen_port, sockaddr in config.PROXYMAPS.items():
-    server_host, server_port = sockaddr
-    p = Proxy(listen_port, server_host, server_port)
+    server_host, server_port, udp = sockaddr
+    p = Proxy(listen_port, server_host, server_port, udp)
     p.daemon = True
     p.start()
 
