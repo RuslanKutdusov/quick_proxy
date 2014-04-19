@@ -79,6 +79,18 @@ class UDPProxy(Proxy):
         socket_to_dumper = {}
         proxy.setblocking(0)
 
+        def filter_data(s, data):
+            data_to_filter[s] += data
+            filter_not_passed = False
+            for pattern in config.FILTER_RE:
+                if re.search(pattern, data_to_filter[s]):
+                    print("Connection dropped at pattern %s" % pattern)
+                    filter_not_passed = True
+
+            if not filter_not_passed:
+                data_to_filter[s] = (data_to_filter[s][-config.FILTER_WINDOW_SIZE:])
+                data_to_send[socket_pairs.get_pair(s)] += data
+
         while True:
             want_read = set([proxy]) | server_sockets
             ready_read = select(want_read, [], [], 10)[0]
@@ -102,27 +114,16 @@ class UDPProxy(Proxy):
 
                     print("Connect to port %s from %s" % (self.listen_port, address))
 
-                data_to_send[server] += data
+                socket_to_dumper[server].dump(data)
+                filter_data(address, data)
 
             for s in ready_read:
                 if s == proxy:
                     continue  # handled above
 
-                s_pair = socket_pairs.get_pair(s)
                 data = s.recv(65536)
                 socket_to_dumper[s].dump(data)
-
-                # check if to filter data out
-                data_to_filter[s] += data
-                filter_not_passed = False
-                for pattern in config.FILTER_RE:
-                    if re.search(pattern, data_to_filter[s]):
-                        print("Connection dropped at pattern %s" % pattern)
-                        filter_not_passed = True
-
-                if not filter_not_passed:
-                    data_to_filter[s] = (data_to_filter[s][-config.FILTER_WINDOW_SIZE:])
-                    data_to_send[s_pair] += data
+                filter_data(s, data)
 
             for s in data_to_send:
                 if len(data_to_send[s]):
