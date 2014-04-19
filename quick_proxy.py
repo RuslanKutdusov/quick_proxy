@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from Queue import Queue
+from datetime import datetime, timedelta
 
 import socket
 import errno
@@ -15,8 +16,9 @@ import config
 
 class Dumper:
     def __init__(self, port):
-        last_session_num = len(glob("port%d_*.dmp" % port))
-        self.filename = "port%d_%09d.dmp" % (port, last_session_num + 1)
+        #last_session_num = len(glob("port%d_*.dmp" % port))
+        #self.filename = "port%d_%09d.dmp" % (port, last_session_num + 1)
+        self.filename = "port%d.dmp" % (port,)
 
     def dump(self, data):
         with open(self.filename, "ab") as f:
@@ -90,6 +92,12 @@ class UDPProxy(Proxy):
             if not filter_not_passed:
                 data_to_filter[s] = (data_to_filter[s][-config.FILTER_WINDOW_SIZE:])
                 data_to_send[socket_pairs.get_pair(s)] += data
+            else:
+                s_pair = socket_pairs.get_pair(s)
+                data_to_send[s_pair] = b''
+                data_to_send[s] = b''
+                data_to_filter[s_pair] = b''
+                data_to_filter[s] = b''
 
         while True:
             want_read = set([proxy]) | server_sockets
