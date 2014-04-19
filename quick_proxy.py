@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from Queue import Queue
 from datetime import datetime, timedelta
+import os
 
 import socket
 import errno
@@ -16,9 +17,10 @@ import config
 
 class Dumper:
     def __init__(self, port):
-        #last_session_num = len(glob("port%d_*.dmp" % port))
-        #self.filename = "port%d_%09d.dmp" % (port, last_session_num + 1)
-        self.filename = "port%d.dmp" % (port,)
+        last_session_num = max(len(glob("port%d_*.dmp" % port)), 1)
+        self.filename = "port%d_%09d.dmp" % (port, last_session_num)
+        if os.path.exists(self.filename) and os.path.getsize(self.filename) >= 104857600:
+            self.filename = "port%d_%09d.dmp" % (port, last_session_num + 1)
 
     def dump(self, data):
         with open(self.filename, "ab") as f:
@@ -122,7 +124,6 @@ class UDPProxy(Proxy):
 
                     print("Connect to port %s from %s" % (self.listen_port, address))
 
-                socket_to_dumper[server].dump(data)
                 filter_data(address, data)
 
             for s in ready_read:
