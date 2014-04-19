@@ -73,7 +73,6 @@ class UDPProxy(Proxy):
 
     def proxy(self, proxy):
         server_sockets = set()
-        client_sockets = set()
         socket_pairs = SocketPairs()
         data_to_send = {}
         data_to_filter = {}
@@ -92,6 +91,7 @@ class UDPProxy(Proxy):
                     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     server.setblocking(0)
                     socket_to_dumper[server] = Dumper(self.listen_port)
+                    server_sockets.add(server)
                     socket_pairs.add_pair(address, server)
 
                     data_to_send[address] = b''
@@ -99,9 +99,6 @@ class UDPProxy(Proxy):
 
                     data_to_filter[address] = b''
                     data_to_filter[server] = b''
-
-                    server_sockets.add(server)
-                    client_sockets.add(address)
 
                     print("Connect to port %s from %s" % (self.listen_port, address))
 
