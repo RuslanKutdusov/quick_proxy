@@ -17,12 +17,17 @@ import config
 
 class Dumper:
     def __init__(self, port):
-        last_session_num = max(len(glob("port%d_*.dmp" % port)), 1)
-        self.filename = "port%d_%09d.dmp" % (port, last_session_num)
+        self.port = port
+        self.last_session_num = max(len(glob("port%d_*.dmp" % self.port)), 1)
+        self.filename = "port%d_%09d.dmp" % (self.port, self.last_session_num)
+
+    def update_filename(self):
         if os.path.exists(self.filename) and os.path.getsize(self.filename) >= 104857600:
-            self.filename = "port%d_%09d.dmp" % (port, last_session_num + 1)
+            self.last_session_num += 1
+            self.filename = "port%d_%09d.dmp" % (self.port, self.last_session_num)
 
     def dump(self, data):
+        self.update_filename()
         with open(self.filename, "ab") as f:
             f.write(data)
 
@@ -131,7 +136,6 @@ class UDPProxy(Proxy):
                     continue  # handled above
 
                 data = s.recv(65536)
-                socket_to_dumper[s].dump(data)
                 filter_data(s, data)
 
             for s in data_to_send:
